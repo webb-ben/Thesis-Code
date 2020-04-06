@@ -2,8 +2,7 @@
 # Spring 2020
 # Ben Webb
 
-from numpy import pi
-
+from math import pi
 
 class Motor:
     def __init__(self, motor_id, port_handler, packet_handler, min_pos, max_pos, max_speed, compliance_margin, compliance_slope, theta_shift=pi/2):
@@ -32,6 +31,10 @@ class Motor:
     def set_angular_compliance(self):
         self.packet_handler.write1ByteTxRx(self.port_handler, self.id, 26, self.compliance_margin)
         self.packet_handler.write1ByteTxRx(self.port_handler, self.id, 27, self.compliance_margin)
+
+    def set_angular_range(self):
+        self.packet_handler.write2ByteTxRx(self.port_handler, self.id, 6, self.min_pos)
+        self.packet_handler.write2ByteTxRx(self.port_handler, self.id, 8, self.max_pos)
 
     def set_angular_slope(self):
         self.packet_handler.write1ByteTxRx(self.port_handler, self.id, 28, self.compliance_slope)
@@ -76,4 +79,4 @@ class Motor:
         self.packet_handler.write2ByteTxRx(self.port_handler, self.id, 30, self.goal_pos)
         if wait:
             while abs(position - self.get_position()) > self.compliance_margin:
-                None
+                _ = None
