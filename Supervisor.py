@@ -3,7 +3,7 @@
 # Ben Webb
 
 from dynamixelSDK.src.dynamixel_sdk import PortHandler, PacketHandler
-from Arm_Simulator import *
+import numpy as np
 import time
 import data
 
@@ -48,39 +48,39 @@ class PID:
         t1, t2 = step_y(t1, t2, solution_x)
         self.arm.set_thetas((t1, t2, t3, t4))
 
-def step(t1, t2, x, y, step_x, step_y):
-    """
-     Follows the linear equations
-     X Axis:  θ1 = -0.0273428 * x - θ2 + 2.144
-              θ2 = -0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421
-     Y Axis:  θ1 = 0.0468319 * Y + -1.8564326
-              θ2 = -1.0093699*θ1 + -0.2813674*θ1**2 + -0.0286046*x + 2.208498
-    :param t1:
-    :param t2:
-    :param x:
-    :param y:
-    :param step_x:
-    :param step_y:
-    :return:
-    """
-
-    x_tan = step_x / (step_x + step_y)
-    y_tan = step_y / (step_x + step_y)
-    print (x_tan, y_tan, step_x)
-    x += step_x
-    y += step_y
-    motor_primitive = np.mat(
-        [[-0.0273428 * x - t2 + 2.144, 0.0468319 * y + -1.8564326],
-        [-0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421, -1.0093699 * t1 + -0.2813674 * t1 ** 2 + -0.0286046 * x + 2.208498]]
-    )
-
-    # tf_mat = np.mat(
-    #     [[x_tan, y_tan],
-    #     [step_x, step_y]]
-    # )
-
-    tf_mat = np.mat([x_tan, y_tan]).T
-    return motor_primitive * tf_mat
+# def step(t1, t2, x, y, step_x, step_y):
+#     """
+#      Follows the linear equations
+#      X Axis:  θ1 = -0.0273428 * x - θ2 + 2.144
+#               θ2 = -0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421
+#      Y Axis:  θ1 = 0.0468319 * Y + -1.8564326
+#               θ2 = -1.0093699*θ1 + -0.2813674*θ1**2 + -0.0286046*x + 2.208498
+#     :param t1:
+#     :param t2:
+#     :param x:
+#     :param y:
+#     :param step_x:
+#     :param step_y:
+#     :return:
+#     """
+#
+#     x_tan = step_x / (step_x + step_y)
+#     y_tan = step_y / (step_x + step_y)
+#     print (x_tan, y_tan, step_x)
+#     x += step_x
+#     y += step_y
+#     motor_primitive = np.mat(
+#         [[-0.0273428 * x - t2 + 2.144, 0.0468319 * y + -1.8564326],
+#         [-0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421, -1.0093699 * t1 + -0.2813674 * t1 ** 2 + -0.0286046 * x + 2.208498]]
+#     )
+#
+#     # tf_mat = np.mat(
+#     #     [[x_tan, y_tan],
+#     #     [step_x, step_y]]
+#     # )
+#
+#     tf_mat = np.mat([x_tan, y_tan]).T
+#     return motor_primitive * tf_mat
 
 
 def step_y(t1, t2, step):
@@ -108,7 +108,7 @@ def step_x(t1, t2, x, step):
 
     :return:
     """
-    dt1 = - 0.0253428 * step + 0.0012492 * x * step
+    dt1 = - 0.0273428 * step + 0.0012492 * x * step
     dt2 = - 0.0012492 * x * step
     return t1 + dt1, t2 + dt2
 
@@ -144,7 +144,7 @@ class Supervisor:
         :return:
         """
         for m in self.arm.motor_list:
-            m.compliance_margin = 0
+            m.compliance_margin = 1
             m.set_angular_compliance()
             m.compliance_slope = 0
             m.set_angular_slope()
@@ -205,16 +205,11 @@ if __name__ == "__main__":
         # sup.movement_planner(square)
         # sup.trial_name = "SquareII.csv"
         # sup.apply_pressure()
-        print (sup.arm.get_ea())
         sup.move(dx=-0.1, steps=100)
-        print (sup.arm.get_ea())
-        sup.move(dy=-0.1, steps=100)
-        print (sup.arm.get_ea())
-        sup.move(dx=0.1, steps=100)
-        print(sup.arm.get_ea())
-        sup.move(dy=0.1, steps=100)
-        print (sup.arm.get_ea())
+        # sup.move(dy=-0.1, steps=100)
+        # sup.move(dx=0.1, steps=100)
+        # sup.move(dy=0.1, steps=100)
     except KeyboardInterrupt:
         sup.trial_record.write("Results/" + sup.trial_name)
-    print("hi ", time.time() - t)
+    print("Time: ", time.time() - t)
     sup.arm.close_connection()

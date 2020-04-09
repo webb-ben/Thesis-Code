@@ -80,3 +80,10 @@ class Motor:
         if wait:
             while abs(position - self.get_position()) > self.compliance_margin:
                 _ = None
+
+    def set_maximum_torque(self, torque = 1023):
+        self.set_speed()
+        self.packet_handler.write2ByteTxRx(self.port_handler, 3, 14, torque)
+        self.enable_torque()
+
+
