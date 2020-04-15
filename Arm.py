@@ -3,8 +3,6 @@
 # Ben Webb
 
 import numpy as np
-
-import data
 import time
 from Motor import *
 
@@ -39,19 +37,21 @@ class Arm:
     def __init__(self, port_handler, packet_handler):
         self.port_handler = port_handler
         self.packet_handler = packet_handler
-        self.motor_list = [Motor(1, port_handler, packet_handler, 255, 767, 80, 5, 32),
-                           Motor(2, port_handler, packet_handler, 100, 973, 120, 5, 32, 0),
-                           Motor(3, port_handler, packet_handler, 105, 800, 50, 5, 16),
-                           Motor(4, port_handler, packet_handler, 50, 793, 210, 5, 16)]
+        self.motor_list = [Motor(1, port_handler, packet_handler, 255, 767, 50, 1, 16, 24),
+                           Motor(2, port_handler, packet_handler, 200, 973, 50, 1, 12, 8, 0),
+                           Motor(3, port_handler, packet_handler, 50, 800, 50, 1, 64, 64),
+                           Motor(4, port_handler, packet_handler, 200, 793, 210, 1, 2, 2)]
+
         self.boot_up()
 
     def boot_up(self):
         self.set_positions(self.get_positions())
         self.set_angular_range()
-        self.enable_torque()
         self.set_speed()
         self.set_angular_compliance()
         self.set_angular_slope()
+        self.enable_torque()
+
 
     def enable_torque(self):
         [m.enable_torque() for m in self.motor_list]
@@ -116,7 +116,7 @@ class Arm:
                             t1 + t2) + 6 * np.sin(t1 + t2) * np.cos(t3) * np.cos(t4) + 6.5 * np.sin(
                             t1 + t2) * np.cos(t3) + 25.3 * np.sin(t1 + t2)],
                        [-np.sin(t3) * np.cos(t4), np.sin(t3) * np.sin(t4), np.cos(t3),
-                        -6 * np.sin(t3) * np.cos(t4) - 6.5 * np.sin(t3) - 18.5 * np.cos(t3) + 19],
+                        -6 * np.sin(t3) * np.cos(t4) - 6.5 * np.sin(t3) - 18.5 * np.cos(t3) + 18.5],
                        [0, 0, 0, 1]])
 
     def get_jacobian(self):
@@ -127,6 +127,10 @@ class Arm:
 
     def get_ea(self):
         return self.get_transformation()[:-1, -1].T.tolist()[0]
+
+    def get_xy(self):
+        t1, t2, = self.motor_list[0].get_theta(), self.motor_list[1].get_theta()
+        return 22.2*np.cos(t1) + 36.5*np.cos(t1 + t2), 22.2*np.sin(t1) + 36.5*np.sin(t1 + t2)
 
     def get_speed(self, i):
         return self.motor_list[i - 1].get_speed()
@@ -295,7 +299,7 @@ class ArmSimulator(Arm):
                                                        [0, 1, 0, 0],
                                                        [0, 0, 1, 5],
                                                        [0, 0, 0, 1]]))
-        self.visualizeArm()
+        # self.visualizeArm()
 
     def get_thetas(self):
         return self.dhp[0, 3], self.dhp[1, 3], self.dhp[2, 3], self.dhp[3, 3]
@@ -305,3 +309,6 @@ class ArmSimulator(Arm):
 
     def get_ea(self):
         return self.t0[-1][0][3], self.t0[-1][1][3], self.t0[-1][1][3]
+
+    def get_xy(self):
+        return self.t0[-1][0][3], self.t0[-1][1][3]
