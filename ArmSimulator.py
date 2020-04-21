@@ -5,7 +5,7 @@ from Arm import *
 class ArmSimulator(Arm):
     def __init__(self, port_handler, packet_handler):
         self.dhp = np.mat([[0, 0, 18.5, 0.1381482112],
-                           [0, 22.3, 0, 1.5],
+                           [0, 22.3, 0, 1.52],
                            [-np.pi / 2, 25.3, 0, 0],
                            [np.pi / 2, 6.5, -1.5, 0],
                            [0, 6, 0, 0],
@@ -88,7 +88,33 @@ class ArmSimulator(Arm):
         a1, a2, a3, a4 = position
         # print (position)
         self.dhp[:, 3] = (np.mat([a1, a2, a3, a4, 0, 0])).T
+        self.tf()
 
+    def get_thetas(self):
+        return self.dhp[0, 3], self.dhp[1, 3], self.dhp[2, 3], self.dhp[3, 3]
+
+    def get_positions(self):
+        return [self.get_position(i) for i in range(1,5)]
+
+    def get_position(self, i):
+        theta = 0 if i == 2 else np.pi/2
+        return self.theta_to_pos(self.dhp[i-1, 3], theta)
+
+    def set_positions(self, position=(512, 512, 512, 512), wait=False):
+        [self.set_position(i+1, position[i]) for i in range(len(position))]
+        self.tf()
+
+    def set_position(self, i, position=512, wait=False):
+        theta = 0 if i == 2 else np.pi / 2
+        self.dhp[i - 1, 3] = self.pos_to_theta(position, theta)
+
+    def theta_to_pos(self, theta, theta_shift):
+        return (205 + (theta + theta_shift) * 195.442270117)
+
+    def pos_to_theta(self, pos, theta_shift):
+        return (pos - 205) * 0.00511660041 - theta_shift
+
+    def tf(self):
         for i in range(self.dhp.shape[0]):
             # Create joint transformation from DH Parameters
             self.t0[i] = np.mat([(np.cos(self.dhp[i,3]), -np.sin(self.dhp[i,3]), 0, self.dhp[i,1]),
@@ -108,9 +134,6 @@ class ArmSimulator(Arm):
                                                        [0, 0, 1, 5],
                                                        [0, 0, 0, 1]]))
         # self.visualizeArm()
-
-    def get_thetas(self):
-        return self.dhp[0, 3], self.dhp[1, 3], self.dhp[2, 3], self.dhp[3, 3]
 
     def close_connection(self):
         return

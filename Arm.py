@@ -36,9 +36,9 @@ class Arm:
     def __init__(self, port_handler, packet_handler):
         self.port_handler = port_handler
         self.packet_handler = packet_handler
-        self.motor_list = [Motor(1, port_handler, packet_handler, 355, 760, 50, 1, 4, 4),
-                           Motor(2, port_handler, packet_handler, 206, 620, 50, 1, 8, 8, 0),
-                           Motor(3, port_handler, packet_handler, 50, 800, 50, 1, 64, 64),
+        self.motor_list = [Motor(1, port_handler, packet_handler, 355, 760, 50, 1, 32, 32),
+                           Motor(2, port_handler, packet_handler, 206, 660, 50, 1, 32, 32, 0),
+                           Motor(3, port_handler, packet_handler, 50, 800, 50, 1, 16, 16),
                            Motor(4, port_handler, packet_handler, 200, 793, 210, 1, 2, 2)]
         self.boot_up()
 
@@ -98,6 +98,12 @@ class Arm:
     def get_thetas(self):
         return [m.get_theta() for m in self.motor_list]
 
+    def get_goal_position(self, i):
+        return self.motor_list[i - 1].get_goal_pos()
+
+    def get_goal_positions(self):
+        return [m.get_goal_pos() for m in self.motor_list]
+
     def get_transformation(self):
         t1, t2, t3, t4 = self.get_thetas()
         return np.array([[-np.sin(t4) * np.sin(t1 + t2) + np.cos(t3) * np.cos(t4) * np.cos(t1 + t2),
@@ -123,10 +129,10 @@ class Arm:
         return inverse_jacobian(*self.get_thetas(), x, y, z, Ya)
 
     def get_ea(self):
-        return self.get_transformation()[:-1, -1].T.tolist()[0]
+        return self.get_transformation()[:-1, -1].T.tolist()
 
     def get_xy(self):
-        t1, t2, = self.motor_list[0].get_theta(), self.motor_list[1].get_theta()
+        t1, t2 = self.motor_list[0].get_theta(), self.motor_list[1].get_theta()
         return 22.2*np.cos(t1) + 36.5*np.cos(t1 + t2), 22.2*np.sin(t1) + 36.5*np.sin(t1 + t2)
 
     def get_xyt(self):
@@ -143,4 +149,4 @@ class Arm:
         return self.motor_list[i - 1].get_load()
 
     def get_loads(self):
-        return [m.get_load() for m in self.motor_list]  
+        return [m.get_load() for m in self.motor_list]

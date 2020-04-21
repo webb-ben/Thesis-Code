@@ -2,214 +2,255 @@
 # Spring 2020
 # Ben Webb
 
+from Arm import *
 from dynamixelSDK.src.dynamixel_sdk import PortHandler, PacketHandler
-import numpy as np
 import time
-import data
+
+np.set_printoptions(precision=5, suppress=True)
 
 
-class Movement:
-    def __init__(self, direction, distance):
-        self.dir = direction
-        self.dist = distance
+def step(p1, p2, x, y, s):
+    """
+     Follows the linear equations
+     X Axis:  P1 = -5.3439414 * X + 1136.064 - P2
+              P2 = -0.1240340 * X **2 + -8.7340980 * y + 897.655633
+     Y Axis:  P1 = 9.1529305 * Y + 149.1745896
+              P2 = -0.1194068 * Y**2 + -5.8520929 * X + 828.9275838
+    :param t1:
+    :param t2:
+    :param x:
+    :param y:
+    :param s:
+    :return:
+    """
+    return np.array((p1, p2)) + np.array(
+        ((-5.3439414 + 0.248068 * x, 9.1529305),
+         (-0.248068 * x, -0.2388136 * y))
+    ) @ s
 
 
 class PID:
-    def __init__(self, arm):
-        self.arm = arm
-        self.x, self.y, _ = self.arm.get_ea()
-        self.pid_x = np.mat((0, 0, 0))
-        self.pid_x_weights = np.mat((0.01, 0.03, 0.001)).T
-        self.pid_y = np.mat((0, 0, 0))
-        self.pid_y_weights = np.mat((0.0, 0.0, 0.0)).T
+    def __init__(self, pos):
+        """
+        Y-motor primitive
+        px, ix, dx = 0.0132, 0.00014, 0.01
+        py, iy, dy = 0.0064, 0.00025, 0.0047
+        """
+        px, ix, dx = 0.074765625, 0.0002, 0.220625
+        py, iy, dy = 0.0671875, 0.00025, 0.218
 
-    def update_pid(self, dx=0.0, dy=0.0):
-        t1, t2, t3, t4 = self.arm.get_thetas()
-        x, y, _ = self.arm.get_ea()
-        residual_x, residual_y = x + dx - self.x, y + dy - self.y
-        self.update_pid_x(residual_x, t1, t2, t3, t4)
-        self.update_pid_x(residual_y, t1, t2, t3, t4)
+        self.pid = np.array(((0.0, 0.0, 0.0),
+                             (0.0, 0.0, 0.0)))
 
-    def update_pid_x(self, residual_x, t1, t2, t3, t4):
-        if residual_x == 0.0: return
-        self.pid_x[0, 2] = residual_x - self.pid_x[0, 0]
-        self.pid_x[0, 0] = residual_x
-        self.pid_x[0, 1] += residual_x
-        solution_y = self.pid_x * self.pid_x_weights
-        t1, t2 = step_y(t1, t2, solution_y)
-        self.arm.set_thetas((t1, t2, t3, t4))
+        self.pid_weights = np.array(((px, py),
+                                     (ix, iy),
+                                     (dx, dy)))
 
-    def update_pid_y(self, residual_y, t1, t2, t3, t4):
-        if residual_y == 0.0: return
-        self.pid_y[0, 2] = residual_y - self.pid_y[0, 0]
-        self.pid_y[0, 0] = residual_y
-        self.pid_y[0, 1] += residual_y
-        solution_x = self.pid_y * self.pid_y_weights
-        t1, t2 = step_y(t1, t2, solution_x)
-        self.arm.set_thetas((t1, t2, t3, t4))
+        self.pid_abs_error = np.array((0.0, 0.0))
+        self.pos = np.array(pos)
 
-# def step(t1, t2, x, y, step_x, step_y):
-#     """
-#      Follows the linear equations
-#      X Axis:  θ1 = -0.0273428 * x - θ2 + 2.144
-#               θ2 = -0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421
-#      Y Axis:  θ1 = 0.0468319 * Y + -1.8564326
-#               θ2 = -1.0093699*θ1 + -0.2813674*θ1**2 + -0.0286046*x + 2.208498
-#     :param t1:
-#     :param t2:
-#     :param x:
-#     :param y:
-#     :param step_x:
-#     :param step_y:
-#     :return:
-#     """
-#
-#     x_tan = step_x / (step_x + step_y)
-#     y_tan = step_y / (step_x + step_y)
-#     print (x_tan, y_tan, step_x)
-#     x += step_x
-#     y += step_y
-#     motor_primitive = np.mat(
-#         [[-0.0273428 * x - t2 + 2.144, 0.0468319 * y + -1.8564326],
-#         [-0.0006346 * x ** 2 + -0.0446889 * y + 3.5440421, -1.0093699 * t1 + -0.2813674 * t1 ** 2 + -0.0286046 * x + 2.208498]]
-#     )
-#
-#     # tf_mat = np.mat(
-#     #     [[x_tan, y_tan],
-#     #     [step_x, step_y]]
-#     # )
-#
-#     tf_mat = np.mat([x_tan, y_tan]).T
-#     return motor_primitive * tf_mat
+    def update_origin(self, pos):
+        self.pos = np.array(pos)
 
+    def update_pid_weight(self, px, ix, dx, py, iy, dy):
+        self.pid = np.array(((0.0, 0.0, 0.0),
+                             (0.0, 0.0, 0.0)))
+        self.pid_weights = np.array(((px, py),
+                                     (ix, iy),
+                                     (dx, dy)))
+        self.pid_abs_error = np.array((0.0, 0.0))
 
-def step_y(t1, t2, step):
-    """
-        Follows the linear equations: θ1 = 0.046834 * Y - 1.856 &
-                                      θ2 = -1.009 * θ1 - 0.2810 * θ**2 - 0.02886 * x + 2.208
-    :param t1: θ1
-    :param t2: θ2
-    :param step: distance in Y of movement
+    def update_pid(self, pos, d):
+        residuals = self.pos - pos
+        self.pos += d
 
-    :return:
-    """
-    dt1 = 0.046884 * step
-    dt2 = -0.047323631268 * step - 0.0263816268 * step * t1
-    return t1 + dt1, t2 + dt2
+        self.pid[:, 2] = residuals - self.pid[:, 0]
+        self.pid[:, 0] = residuals
+        self.pid[:, 1] += residuals
 
+        self.pid_abs_error += abs(residuals)
 
-def step_x(t1, t2, x, step):
-    """
-    Follows the linear equations: (θ1 + θ2) = -0.027x + 2.144 &
-                                   θ2 = -0.0006246 * x**2 + -0.044708*y + 3.544510
-    :param t1: θ1
-    :param t2: θ2
-    :param step: distance in Y of movement
+        result = self.pid @ self.pid_weights
 
-    :return:
-    """
-    dt1 = - 0.0273428 * step + 0.0012492 * x * step
-    dt2 = - 0.0012492 * x * step
-    return t1 + dt1, t2 + dt2
+        return np.array((result[0, 0], result[1, 1]))
 
 
 class Supervisor:
-    def __init__(self, trial=None):
-        import sys, os
+    def __init__(self):
+        import sys
+        import os
         if sys.platform == 'linux':
-            self.port_handler = PortHandler('/dev/ttyACM0')
+            port_handler = PortHandler('/dev/ttyACM0')
         else:
-            self.port_handler = PortHandler('/dev/' + os.listdir('/dev')[-2])
+            port_handler = PortHandler('/dev/' + os.listdir('/dev')[-2])
+        packet_handler = PacketHandler(1.0)
 
-        self.trial_name = trial
-        self.trial_record = data.Data('template.csv')
-
-        self.packet_handler = PacketHandler(1.0)
         try:
-            self.port_handler.openPort()
-            self.port_handler.setBaudRate(1000000)
-        except:
-            None
-        self.arm = Arm_Simulator(self.port_handler, self.packet_handler)
-        self.pid = PID(self.arm)
+            port_handler.openPort()
+            port_handler.setBaudRate(1000000)
+        except OSError:
+            _ = None
 
-    def move(self, dx=0.0, dy=0.0, dz=0.0, steps=1000, step_time=0):
+        self.arm = Arm(port_handler, packet_handler)
+
+        self.apply_pressure = False
+        self.pid = PID(self.arm.get_xy())
+
+    def move(self, d, steps=400, step_time=0.005):
         """
-
-        :param dx:
-        :param dy:
-        :param dz:
+        :param d:
         :param steps:
         :param step_time:
         :return:
         """
-        for m in self.arm.motor_list:
-            m.compliance_margin = 1
-            m.set_angular_compliance()
-            m.compliance_slope = 0
-            m.set_angular_slope()
-            m.set_speed()
-        self.arm.set_positions(self.arm.get_positions())
-        a1, a2, a3, a4 = self.arm.get_thetas()
-        for i in range(steps):
-            # if self.trial_name:
-            #     self.trial_record.addRow((i, *self.arm.get_thetas(), *self.arm.get_ea(), *self.arm.get_speeds(), *self.arm.get_loads()))
-            #
-            # print (*self.arm.get_thetas(), *self.arm.get_ea(), *self.arm.get_speeds(), *self.arm.get_loads())
+        p1, p2, p3, p4 = self.arm.get_positions()
+        p4 = 512
+        i = 0
+        while i < steps:
+            _ = time.perf_counter() + step_time
+            x, y = self.arm.get_xy()
+            s = d * (np.cos(np.pi*i/steps+np.pi)+1)
+            pid = self.pid.update_pid(np.array((x, y)), s)
+            p1, p2 = step(p1, p2, x, y, s + pid)
+            if self.apply_pressure:
+                p3 = 512
+            self.arm.set_positions((p1, p2, p3, p4))
+            i += 1
+            while time.perf_counter() < _:
+                pass
+        time.sleep(0.4)
+        return i
 
-            if dx != 0.0 and 3 * np.pi / 4 > a1 + a2 > np.pi / 4:
+    def pressure(self):
+        self.apply_pressure = True
+        a1, a2, a3, a4 = self.arm.get_positions()
+        self.arm.set_positions((a1, a2, 512, a4))
+        time.sleep(0.6)
 
-                x, y, _ = self.arm.get_ea()
-                a1, a2 = step_x(a1, a2, x, dx)
-                # r = step(a1, a2, x, y, dx, 0)
-                # a1, a2 = r[0,0], r[1,0]
-                # print(a1, a2, x, y)
-                self.arm.set_thetas((a1, a2, a3, a4))
-                # self.pid.update_pid(dx=dx)
-                # time.sleep(step_time)
+    def train_pid(self):
+        prev_error_x, prev_error_y = 10000.0, 10000.0
 
-            if dy != 0.0 and np.pi / 2 > a1 > -np.pi / 2:
-                a1, a2 = step_y(a1, a2, dy)
-                self.arm.set_thetas((a1, a2, a3, a4))
-                # time.sleep(step_time)
+        px, ix, dx = 0.007000, 0.00003, 0.005037
+        py, iy, dy = 0.005177, 0.00001, 0.00270
 
-            if dz != 0.0:
-                self.arm.move(dx=0, dy=0, dz=dz, Ya=0, steps=2)
+        vx, vy = 0.001, 0.001
 
-        # self.pid.update_pid(dx, dy)
-        time.sleep(0.1)
-        self.arm.set_positions(self.arm.get_positions())
+        for j in range(1):
+            self.pid.update_pid_weight(px, ix, dx, py, iy, dy)
+            # self.pid.update_origin(self.arm.get_xy())
+            r = 0
+            for f in range(1):
+                r += self.move(np.array([ 0.00,  0.025]))
+                r += self.move(np.array([ 0.025,  0.00]))
+                r += self.move(np.array([ 0.00, -0.025]))
+                r += self.move(np.array([-0.025,  0.00]))
+                # r += self.move(np.array([ 0.025,  0.00]))
+                # r += self.move(np.array([ 0.00,  0.025]))
+                # r += self.move(np.array([-0.025,  0.00]))
+                # r += self.move(np.array([ 0.00, -0.025]))
 
-    def movement_planner(self, movements, steps=1000):
-        """
+            print(
+                  "%.8f %.8f %.6f %.6f %.6f %.6f %.6f %.6f" %
+                  (*(self.pid.pid_abs_error / r).tolist(), px, ix, dx, py, iy, dy))
 
-        :param movements:
-        :param steps:
-        :return:
-        """
-        for m in movements:
-            if m.dir == 'dx':
-                self.move(dx=m.dist / steps)
-            if m.dir == 'dy':
-                self.move(dy=m.dist / steps)
+            if self.pid.pid_abs_error[0]/r < prev_error_x:
+                dx += vx
+                vx /= 2
+            else:
+                dx -= vx
+                vx *= -1
 
-    def apply_pressure(self):
-        self.arm.set_speed()
-        self.arm.set_theta(sup.arm.motor_list[2], 0, True)
+            if self.pid.pid_abs_error[1]/r < prev_error_y:
+                dy += vy
+                vy /= 2
+            else:
+                dy -= vy
+                vy *= -1
+
+            prev_error_x, prev_error_y = self.pid.pid_abs_error / r
+
+
+'''
+643.8830877189278 303.72287507548714 10000 10000 0.0075 0.005
+696.453379797246 307.69105620247564 643.8830877189278 303.72287507548714 0.0125 0.01
+719.1808566471108 324.40590987080543 696.453379797246 307.69105620247564 0.01 0.0075
+705.868515423729 324.5148855639921 719.1808566471108 324.40590987080543 0.0125 0.01
+728.8244944673896 337.6749557419218 705.868515423729 324.5148855639921 0.015000000000000001 0.0075
+
+0.46996680 0.47318441 0.00500 0.00000 0.00220 0.00150 0.00000 0.00110
+0.42030037 0.30397424 0.00500 0.00000 0.00270 0.00150 0.00000 0.00160
+0.47279692 0.31583070 0.00500 0.00000 0.00295 0.00150 0.00000 0.00185
+0.47127508 0.33234551 0.00500 0.00000 0.00283 0.00150 0.00000 0.00172
+0.43922467 0.30536477 0.00500 0.00000 0.00270 0.00150 0.00000 0.00185
+0.40998432 0.30491520 0.00500 0.00000 0.00264 0.00150 0.00000 0.00198
+0.39439062 0.29559661 0.00500 0.00000 0.00261 0.00150 0.00000 0.00204
+0.41306375 0.28868056 0.00500 0.00000 0.00259 0.00150 0.00000 0.00207
+0.41786780 0.28694614 0.00500 0.00000 0.00260 0.00150 0.00000 0.00208
+0.42054947 0.34659056 0.00500 0.00000 0.00259 0.00150 0.00000 0.00209
+
+0.46088514 0.24785328 0.00500 0.00000 0.00260 0.00150 0.00000 0.00208
+0.48746732 0.24273448 0.00510 0.00000 0.00260 0.00160 0.00000 0.00208
+0.47956108 0.24669842 0.00505 0.00000 0.00260 0.00165 0.00000 0.00208
+0.51094401 0.24468197 0.00500 0.00000 0.00260 0.00162 0.00000 0.00208
+0.48934883 0.26720067 0.00503 0.00000 0.00260 0.00160 0.00000 0.00208
+0.50339880 0.24947273 0.00505 0.00000 0.00260 0.00161 0.00000 0.00208
+0.47852467 0.24437587 0.00504 0.00000 0.00260 0.00162 0.00000 0.00208
+0.47598820 0.26329172 0.00502 0.00000 0.00260 0.00163 0.00000 0.00208
+0.45237502 0.26916721 0.00502 0.00000 0.00260 0.00163 0.00000 0.00208
+0.51974882 0.27134092 0.00502 0.00000 0.00260 0.00163 0.00000 0.00208
+
+0.48695793 0.30458314 0.00502 0.00001 0.00260 0.00163 0.00001 0.00208
+0.46719501 0.42058786 0.00502 0.00002 0.00260 0.00163 0.00002 0.00208
+0.45079472 0.33820897 0.00502 0.00003 0.00260 0.00163 0.00002 0.00208
+0.40557133 0.28543828 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.43498817 0.32718758 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.42085486 0.31168317 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.46989095 0.32822550 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.44819912 0.36604331 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.44145286 0.34223696 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+0.38791984 0.34973114 0.00502 0.00003 0.00260 0.00163 0.00001 0.00208
+
+0.41522840 0.21887038 0.00502 0.00003 0.002600 0.001630 0.00001 0.00208
+0.37692482 0.27164277 0.00502 0.00003 0.003600 0.001630 0.00001 0.00308
+0.37958812 0.22572004 0.00502 0.00003 0.004100 0.001630 0.00001 0.00258
+0.37484665 0.26155028 0.00502 0.00003 0.003850 0.001630 0.00001 0.00208
+0.39732353 0.21706915 0.00502 0.00003 0.003600 0.001630 0.00001 0.00233
+0.38065857 0.20999026 0.00502 0.00003 0.003725 0.001630 0.00001 0.00258
+0.37821544 0.20906885 0.00502 0.00003 0.003850 0.001630 0.00001 0.00270
+0.36078353 0.23295346 0.00502 0.00003 0.003912 0.001630 0.00001 0.00277
+0.38837039 0.22753862 0.00502 0.00003 0.003944 0.001630 0.00001 0.00274
+0.39094840 0.26133627 0.00502 0.00003 0.003928 0.001630 0.00001 0.00270
+
+0.37896089 0.25639254 0.00502 0.00003 0.003912 0.001630 0.00001 0.00270
+0.32788777 0.22813436 0.00602 0.00003 0.003912 0.002630 0.00001 0.00270
+0.38326536 0.18436255 0.00652 0.00003 0.003912 0.003130 0.00001 0.00270
+0.33432872 0.18992730 0.00627 0.00003 0.003912 0.003380 0.00001 0.00270
+0.38243670 0.16835535 0.00602 0.00003 0.003912 0.003255 0.00001 0.00270
+0.38576211 0.18513771 0.00614 0.00003 0.003912 0.003130 0.00001 0.00270
+0.37804508 0.18494384 0.00602 0.00003 0.003912 0.003193 0.00001 0.00270
+0.40588419 0.17771794 0.00589 0.00003 0.003912 0.003255 0.00001 0.00270
+0.40976448 0.20078930 0.00596 0.00003 0.003912 0.003286 0.00001 0.00270
+0.38857670 0.16611136 0.00589 0.00003 0.003912 0.003271 0.00001 0.00270
+
+0.36447927 0.21356784 0.00502 0.00003 0.003912 0.003271 0.00001 0.00270
+0.34475730 0.17507821 0.00602 0.00003 0.003912 0.004271 0.00001 0.00270
+0.33641832 0.17455551 0.00652 0.00003 0.003912 0.004771 0.00001 0.00270
+0.31095328 0.15863153 0.00677 0.00003 0.003912 0.005021 0.00001 0.00270
+0.29927448 0.15852475 0.00690 0.00003 0.003912 0.005146 0.00001 0.00270
+0.29297853 0.15988414 0.00696 0.00003 0.003912 0.005209 0.00001 0.00270
+0.29692056 0.14558157 0.00699 0.00003 0.003912 0.005177 0.00001 0.00270
+0.32735334 0.15468232 0.00697 0.00003 0.003912 0.005146 0.00001 0.00270
+0.29904374 0.16225937 0.00699 0.00003 0.003912 0.005162 0.00001 0.00270
+0.29072260 0.15246693 0.00700 0.00003 0.003912 0.005146 0.00001 0.00270
+
+'''
 
 if __name__ == "__main__":
+    sup = Supervisor()
+    sup.pressure()
     t = time.time()
+    sup.train_pid()
     try:
-        sup = Supervisor()
-        # square = (Movement('dx', 10), Movement('dy', 10), Movement('dx', -10), Movement('dy', -10))
-        # sup.movement_planner(square)
-        # sup.trial_name = "SquareII.csv"
-        # sup.apply_pressure()
-        sup.move(dx=-0.1, steps=100)
-        # sup.move(dy=-0.1, steps=100)
-        # sup.move(dx=0.1, steps=100)
-        # sup.move(dy=0.1, steps=100)
-    except KeyboardInterrupt:
-        sup.trial_record.write("Results/" + sup.trial_name)
-    print("Time: ", time.time() - t)
-    sup.arm.close_connection()
+        print("Time: ", time.time() - t)
+    finally:
+        sup.arm.close_connection()
