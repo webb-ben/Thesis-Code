@@ -3,114 +3,150 @@ import freenect
 import cv2
 import numpy as np
 import imutils
+from imutils import perspective
+import frame_convert2
 
-
-def order_points(pts):
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    return rect
-
-
-def four_point_transform(image, pts):
-    # obtain a consistent order of the points and unpack them
-    # individually
-    rect = order_points(pts)
-    (tl, tr, br, bl) = rect
-
-    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-    maxWidth = max(int(widthA), int(widthB))
-
-    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-    maxHeight = max(int(heightA), int(heightB))
-
-    dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]], dtype="float32")
-    M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
-    return warped
-
-
-# function to get RGB image from kinect
-def get_video():
-    array, _ = freenect.sync_get_video()
-    array = cv2.cvtColor(array, cv2.COLOR_RGB2BGR)
-    return array
-
-
-# function to get depth image from kinect
 def get_depth():
-    array, _ = freenect.sync_get_depth()
-    array = array.astype(np.uint8)
-    return array
+    return frame_convert2.pretty_depth_cv(freenect.sync_get_depth()[0])
+    return cv2.fastNlMeansDenoising(f, None, 10, 7, 21)
 
+def get_video():
+    f = frame_convert2.video_cv(freenect.sync_get_video()[0])
+    return cv2.fastNlMeansDenoisingColored(f, None, 10, 10, 3, 3)
 
-# loop runs if capturing has been initialized
-while (1):
-    # reads frames from a camera
-    frame = get_video()
+class CV(object):
+    def __init__(self):
+        self.width = 629
+        self.height = 503
+        # rect = perspective.order_points(np.array([(100, 24), (555, 21), (9, 382), (633 ,387)]))
+        rect = perspective.order_points(np.array([(201, 38), (1107, 30), (20, 756), (1273, 766)]))
 
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([127, 67, 142]), np.array([179, 255, 255]))
-    mask += cv2.inRange(hsv, np.array([37, 112, 0]), np.array([179, 255, 201]))
+        # now that we have the dimensions of the new image, construct
+        # the set of destination points to obtain a "birds eye view",
+        # (i.e. top-down view) of the image, again specifying points
+        # in the top-left, top-right, bottom-right, and bottom-left
+        # order
+        dst = np.array([
+            [0, 0],
+            [self.width - 1, 0],
+            [self.width - 1, self.height - 1],
+            [0, self.height - 1]], dtype="float32")
 
-    mask = cv2.dilate(mask, None, iterations =2)
-    blur = cv2.GaussianBlur(mask, (7,7), 0)
+        # compute the perspective transform matrix and then apply it
+        self.M = cv2.getPerspectiveTransform(rect, dst)
+        self.uw = False
+        self.uf = False
+        self.box_cnt = ()
+        self.box = None
+        self.frame = None
+        self.warped_frame = None
+        self.depth = None
+        self.warped_depth = None
 
-    edges = cv2.Canny(blur, 30, 100)
-    edges = cv2.dilate(edges, None, iterations=1)
-    edges = cv2.erode(edges, None, iterations=1)
+    def update_frame(self):
+        self.frame = get_video()
+        # self.depth = get_depth()
+        self.uw = False
+        self.uf = True
 
-    cnts = cv2.findContours(edges.copy(), cv2.RETR_EXTERNAL,
-                            cv2.CHAIN_APPROX_SIMPLE)
-    cnts = imutils.grab_contours(cnts)
-    #
-    # # loop over the contours individually
-    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
-    # loop over the contours
-    for c in cnts:
-        # approximate the contour
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        # if our approximated contour has four points, then we
-        # can assume that we have found our screen
-        if len(approx) == 4:
-            screenCnt = approx
+    def update_warped(self):
+        if not self.uf: self.update_frame()
+        if self.uw: return
+        self.warped_frame = cv2.warpPerspective(self.frame, self.M, (629, 500))
+        self.warped_frame = cv2.rotate(self.warped_frame, cv2.ROTATE_180)
+
+        # self.warped_depth = cv2.warpPerspective(self.frame, self.M, (629, 500))
+        self.uw = True
+        if len(self.box_cnt) == 4:
+            pass
+            cv2.drawContours(self.warped_frame, [self.box_cnt], -1, (0, 0, 255), 1)
+
+    def update_box(self):
+        self.update_warped()
+        hsv = cv2.cvtColor(self.warped_frame, cv2.COLOR_BGR2HSV)
+        blur = cv2.bilateralFilter(hsv, 2, 50, 50)
+        mask = cv2.inRange(blur, np.array((0, 0, 0)), np.array((180, 255, 255)))
+        mask += cv2.inRange(blur, np.array((140, 255, 104)), np.array((180, 255, 244)))
+        mask += cv2.inRange(blur, np.array((136, 61, 95)), np.array((179, 255, 176)))
+        mask += cv2.inRange(blur, np.array((0, 165, 96)), np.array((104, 255, 255)))
+        mask += cv2.inRange(blur, np.array((161, 128, 76)), np.array((179, 255, 255)))
+
+        self.box_edges = cv2.Canny(mask, 0, 0)
+
+        cnts = cv2.findContours(self.box_edges.copy(), cv2.RETR_EXTERNAL,
+                                cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
+        #
+        # # loop over the contours individually
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+        # loop over the contours
+        for c in cnts:
+            # approximate the contour
+            if 17000 < cv2.contourArea(c) < 15000:
+                continue
+
+            peri = cv2.arcLength(c, True)
+            approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+            # if our approximated contour has four points, then we
+            # can assume that we have found our screen
+            # cv2.drawContours(self.warped_frame, [approx], -1, (0, 0, 0), 2)
+            if len(approx) == 4:
+                self.box_cnt = approx
+
+            self.box = perspective.four_point_transform(self.warped_frame, self.box_cnt.reshape(4, 2))
             break
 
-    peri = cv2.arcLength(c, True)
-    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-    cv2.drawContours(frame, [screenCnt], -1, (0, 255, 0), 2)
-    warped = four_point_transform(frame, screenCnt.reshape(4, 2))
-    # cv2.drawContours(frame, [c.astype("int")], -1, (0, 255, 0), 2)
-    # cv2.circle(frame, extLeft, 8, (0, 0, 255), -1)
-    # cv2.circle(frame, extRight, 8, (0, 255, 0), -1)
-    # cv2.circle(frame, extTop, 8, (255, 0, 0), -1)
-    # cv2.circle(frame, extBot, 8, (255, 255, 0), -1)
-        # warped = four_point_transform(frame, c)
-    # Display edges in a frame
-    cv2.imshow('Edges', edges)
+    def update_line(self):
+        self.update_warped()
+        hsv = cv2.cvtColor(self.warped_frame, cv2.COLOR_BGR2HSV)
+        blur = cv2.bilateralFilter(hsv, 2, 50, 50)
+        mask = cv2.inRange(blur, np.array((0, 0, 0)), np.array((180, 255, 255)))
+        mask += cv2.inRange(blur, np.array((140, 255, 104)), np.array((180, 255, 244)))
+        mask += cv2.inRange(blur, np.array((136, 61, 95)), np.array((179, 255, 176)))
+        mask += cv2.inRange(blur, np.array((0, 165, 96)), np.array((104, 255, 255)))
+        mask += cv2.inRange(blur, np.array((161, 128, 76)), np.array((179, 255, 255)))
 
-    # Display an original image
-    cv2.imshow("Original", frame)
-    cv2.imshow("Scanned", imutils.resize(warped, height=500, width = 500))
+        self.box_edges = cv2.Canny(mask, 0, 0)
+
+    # loop runs if capturing has been initialized
+    def run(self):
+        cv2.namedWindow('Original', cv2.WINDOW_NORMAL)
+        while (1):
+            self.update_line()
+
+            # Display an original image
+            if self.frame is not None:
+                cv2.imshow("Original", self.frame)
+                cv2.imshow("edges", self.box_edges)
+                pass
+
+            # cv2.imshow('Edges', edges)
+            if self.warped_frame is not None:
+                cv2.imshow("Warped Frame", self.warped_frame)
+                pass
+
+            if self.depth is not None:
+                cv2.imshow("Depth", self.depth)
+                pass
+
+            if self.depth is not None:
+                cv2.imshow("Warped Depth", self.depth)
+                pass
+
+            if self.box is not None:
+                cv2.imshow("Box", self.box)
+                pass
 
 
-    # cv2.imshow('Warped', warped)
+            # Wait for Esc key to stop
+            k = cv2.waitKey(5) & 0xFF
+            if k == 27:
+                break
+            self.uf = False
 
-    # Wait for Esc key to stop
-    k = cv2.waitKey(5) & 0xFF
-    if k == 27:
-        break
+        # De-allocate any associated memory usage
+        cv2.destroyAllWindows()
 
-# De-allocate any associated memory usage
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    cv = CV()
+    cv.run()
