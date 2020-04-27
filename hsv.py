@@ -13,6 +13,44 @@ def get_video():
     f = frame_convert2.video_cv(freenect.sync_get_video()[0])
     return cv2.fastNlMeansDenoisingColored(f, None, 10, 10, 3, 3)
 
+def home():
+    while 1:
+        img = get_video()
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        blur = cv2.bilateralFilter(hsv, 2, 50, 50)
+        mask = cv2.inRange(blur, np.array((131,92,31)), np.array((156,248,149)))
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask = cv2.dilate(mask, kernel, iterations=3)
+        edges = cv2.Canny(mask, 30, 100)
+        cv2.imshow("e",edges)
+        cnts = cv2.findContours(edges.copy(), cv2.RETR_EXTERNAL,
+                                cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
+        #
+        # # loop over the contours individually
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+        # loop over the contours
+
+        pts = []
+        for c in cnts:
+            # approximate the contour
+            if cv2.contourArea(c) < 150:
+                continue
+            print (len(cnts), cv2.contourArea(c))
+            box = cv2.minAreaRect(c)
+            box = cv2.boxPoints(box)
+            box = np.array(box, dtype="int")
+            box = perspective.order_points(box)
+            pts.append((np.average(box[:, 0]), np.average(box[:, 1])))
+
+        if len(pts) == 4:
+            break
+    print (pts)
+    return perspective.order_points(np.array(pts))
+
+
+
 def four_point_transform(image, pts):
     # obtain a consistent order of the points and unpack them
     # individually
@@ -47,8 +85,11 @@ cv2.createTrackbar('HMax','image',0,255,nothing)
 cv2.createTrackbar('SMax','image',0,255,nothing)
 cv2.createTrackbar('VMax','image',0,255,nothing)
 
-cv2.createTrackbar('l','image',0,255,nothing)
-cv2.createTrackbar('h','image',0,255,nothing)
+cv2.createTrackbar('k-size','image',1,19,nothing)
+cv2.createTrackbar('o-size','image',1,19,nothing)
+cv2.createTrackbar('c-size','image',1,19,nothing)
+
+# cv2.createTrackbar('h','image',,255,nothing)
 
 # # Set default value for MAX HSV trackbars.
 cv2.setTrackbarPos('HMin', 'image', 0)
@@ -56,16 +97,49 @@ cv2.setTrackbarPos('HMax', 'image', 179)
 cv2.setTrackbarPos('SMax', 'image', 255)
 cv2.setTrackbarPos('VMax', 'image', 255)
 
+width = 629
+height = 503
+
+rect = perspective.order_points(np.array([(162, 34), (1123, 35), (20, 819), (1247, 824)]))
+# r = np.array([(8.0, 906.0), (109.0, 22.0), (1163, 36), (1255, 899)])
+# print(r)
+# h = home()
+(tl, tr, br, bl) = rect
+widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+maxWidth = max(int(widthA), int(widthB))
+
+# compute the height of the new image, which will be the
+# maximum distance between the top-right and bottom-right
+# y-coordinates or the top-left and bottom-left y-coordinates
+heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+maxHeight = max(int(heightA), int(heightB))
+# now that we have the dimensions of the new image, construct
+# the set of destination points to obtain a "birds eye view",
+# (i.e. top-down view) of the image, again specifying points
+# in the top-left, top-right, bottom-right, and bottom-left
+# order
+maxHeight = int(maxWidth * 0.8)
+dst = np.array([
+    [0, 0],
+    [maxWidth - 1, 0],
+    [maxWidth - 1, maxHeight - 1],
+    [0, maxHeight - 1]], dtype="float32")
+# compute the perspective transform matrix and then apply it
+M = cv2.getPerspectiveTransform(rect, dst)
 # Initialize to check if HSV min/max value changes
+
 hMin = sMin = vMin = hMax = sMax = vMax = 0
 phMin = psMin = pvMin = phMax = psMax = pvMax = 0
 img = get_video()
 
 output = img
 waitTime = 33
-
 while(1):
     img = get_video()
+    # img = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
+    # img = cv2.rotate(img, cv2.ROTATE_180)
 
     # get current positions of all trackbars
     hMin = cv2.getTrackbarPos('HMin','image')
@@ -76,8 +150,9 @@ while(1):
     sMax = cv2.getTrackbarPos('SMax','image')
     vMax = cv2.getTrackbarPos('VMax','image')
 
-    l = cv2.getTrackbarPos('l', 'image')
-    h = cv2.getTrackbarPos('h', 'image')
+    k = cv2.getTrackbarPos('k-size', 'image')
+    o = cv2.getTrackbarPos('o-size', 'image')
+    c = cv2.getTrackbarPos('c-size', 'image')
 
     # Set minimum and max HSV values to display
     lower = np.array([hMin, sMin, vMin])
@@ -86,16 +161,17 @@ while(1):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     blur = cv2.bilateralFilter(hsv, 2, 50, 50)
     mask = cv2.inRange(blur, lower, upper)
-    # mask += cv2.inRange(blur, np.array((140,255,104)), np.array((180,255,244)))
-    # mask += cv2.inRange(blur, np.array((0,165,96)), np.array((104,255,255)))
-    # mask += cv2.inRange(blur, np.array((161, 128, 76)), np.array((179, 255, 255)))
+    # mask += cv2.inRange(blur, np.array((150,99,84)), np.array((180,255,255)))
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=c)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=o)
 
+    # mask = cv2.dilate(mask, kernel, iterations = 3)
     output = cv2.bitwise_and(img, img, mask=mask)
 
     # Find edges
-    edges = cv2.Canny(mask, l, h)
+    edges = cv2.Canny(mask, 30, 100)
     # edges = cv2.dilate(edges, kernel, iterations=2)
     # edges = cv2.erode(edges, 1 - kernel, iterations=1)
     # lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, 10, 0)
@@ -131,7 +207,6 @@ while(1):
         phMax = hMax
         psMax = sMax
         pvMax = vMax
-
     # Display output image
     # cv2.imshow('image',output)
     # cv2.imshow('orig', img)

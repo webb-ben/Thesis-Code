@@ -93,7 +93,7 @@ class Motor:
         elif position < self.min_pos:
             position = self.min_pos
         self.goal_pos = int(position)
-        self.packet_handler.write2ByteTxOnly(self.port_handler, self.id, 30 , self.goal_pos)
+        self.packet_handler.write2ByteTxOnly(self.port_handler, self.id, 30, self.goal_pos)
         if wait:
             while abs(self.goal_pos - self.get_position()) > self.compliance_margin:
                 pass

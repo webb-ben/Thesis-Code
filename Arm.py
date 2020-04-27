@@ -4,20 +4,21 @@
 
 import numpy as np
 from Motor import Motor
+import time
 
 
 import datetime
 import data
-import sys, tty, termios
-fd = sys.stdin.fileno()
-old_settings = termios.tcgetattr(fd)
-def getch():
-    try:
-        tty.setraw(sys.stdin.fileno())
-        ch = sys.stdin.read(1)
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+# import sys, tty, termios
+# fd = sys.stdin.fileno()
+# old_settings = termios.tcgetattr(fd)
+# def getch():
+#     try:
+#         tty.setraw(sys.stdin.fileno())
+#         ch = sys.stdin.read(1)
+#     finally:
+#         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+#     return ch
 
 def inverse_jacobian(a1, a2, a3, a4, x, y, z, Ya):
     return np.linalg.inv(jacobian(a1, a2, a3, a4)) \
@@ -49,10 +50,10 @@ class Arm:
     def __init__(self, port_handler, packet_handler):
         self.port_handler = port_handler
         self.packet_handler = packet_handler
-        self.motor_list = [Motor(1, port_handler, packet_handler, 355, 760, 50, 1, 32, 32),
-                           Motor(2, port_handler, packet_handler, 206, 660, 50, 1, 32, 32, 0),
+        self.motor_list = [Motor(1, port_handler, packet_handler, 355, 760, 1023, 1, 16, 16),
+                           Motor(2, port_handler, packet_handler, 206, 660, 1020, 1, 32, 32, 0),
                            Motor(3, port_handler, packet_handler, 50, 800, 50, 1, 16, 16),
-                           Motor(4, port_handler, packet_handler, 200, 793, 210, 1, 2, 2)]
+                           Motor(4, port_handler, packet_handler, 200, 793, 210, 1, 32, 32)]
         self.boot_up()
 
     def boot_up(self):
@@ -164,32 +165,35 @@ class Arm:
     def get_loads(self):
         return [m.get_load() for m in self.motor_list]
 
-    def trial(self, type='Line'):
-        self.disable_torque()
-        self.motor_list[2].enable_torque()
-        self.motor_list[3].enable_torque()
-        toc = data.Data('TableOfContents.csv')
-        while 1:
-            c = getch()
-            if c == chr(0x1b): break
-            elif c == chr(0x20):
-                newtrial = data.Data('template.csv')
-                filename = '%s%.3i.csv' % (type, toc.get_num_points())
-                print (toc.count_matching('filename', type))
-                print('Now tracking ' + filename)
-                i = 0
-                p0 = self.get_xy()
-                # for i in range(500):
-                speed = self.get_speeds()
-                while speed[0] != 0 or speed[1] != 0 or speed[2] != 0 or speed[3] != 0 or i < 200:
-                    newtrial.addRow((i, self.get_position(1), self.get_position(2), *self.get_xy(), *speed))
-                    print(i)
-                    i += 1
-                    speed = self.get_speeds()
-                print('Closing ' + filename)
-                p = self.get_ea()
-                dist = np.sqrt((p0[0] - p[0])**2 + (p0[1] - p[1])**2)
-                toc.addRow((filename, '/DataFolder/Data/Y'+filename, datetime.datetime.now(), type, dist, np.arctan2(p0[1]-p[1], p0[0]-p[0]), *p0, *p))
-                newtrial.write(filename, True, 'Y')
-                toc.write('TableOfContents.csv', False)
-                print('Done tracking ' + filename)
+    # def trial(self, type='Line'):
+    #     self.disable_torque()
+    #     self.motor_list[2].enable_torque()
+    #     self.motor_list[3].enable_torque()
+    #     toc = data.Data('TableOfContents.csv')
+    #     j = 0
+    #     while 1:
+    #         c = getch()
+    #         if c == chr(0x1b): break
+    #         elif c == chr(0x20):
+    #             newtrial = data.Data('template.csv')
+    #             filename = '%s%.3i.csv' % (type, toc.get_num_points() + j)
+    #             print (toc.count_matching('filename', type))
+    #             print('Now tracking ' + filename)
+    #             i = 0
+    #             p0 = self.get_xy()
+    #             # for i in range(500):
+    #             s1, s2 = self.get_speed(1), self.get_speed(1)
+    #             while s1 != 0 or s2 != 0 or i < 100:
+    #                 newtrial.addRow((i, self.get_position(1), self.get_position(2), 0, 0, *self.get_xy(), 0, s1, s2, 0, 0,0,0,0,0))
+    #                 # time.sleep(0.005)
+    #                 print (i)
+    #                 i += 1
+    #                 s1, s2 = self.get_speed(1), self.get_speed(1)
+    #             print('Closing ' + filename)
+    #             p = self.get_ea()
+    #             dist = np.sqrt((p0[0] - p[0])**2 + (p0[1] - p[1])**2)
+    #             toc.addRow((filename, '/DataFolder/Data/X' + filename, datetime.datetime.now(), type, dist, np.arctan2(p0[1]-p[1], p0[0]-p[0]), *p0, *p))
+    #             newtrial.write(filename, True, 'X')
+    #             toc.write('TableOfContents.csv', False)
+    #             print('Done tracking ' + filename)
+    #             j += 1
