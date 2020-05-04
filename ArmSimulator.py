@@ -4,12 +4,13 @@ from Arm import *
 
 class ArmSimulator(Arm):
     def __init__(self, port_handler, packet_handler):
-        self.dhp = np.mat([[0, 0, 18.5, 0.1381482112],
-                           [0, 22.3, 0, 1.52],
-                           [-np.pi / 2, 25.3, 0, 0],
-                           [np.pi / 2, 6.5, -1.5, 0],
-                           [0, 6, 0, 0],
-                           [0, 0, -15.5, 0]])
+        self.dhp = np.array([[0, 0, 10.5, -0.5628260460248966],
+                  [0, 22, 0,1.92895835457],
+                  [-np.pi / 2, 24.5, 0, -0.3069960255248967],
+                  [np.pi / 2, 7, 0, -0.3069960255248967],
+                  [0,0, -1.25, 0],
+                  [0, 5, 0, 0],
+                  [0, 0, -8.5, 0]])
         self.init_vis()
         self.set_thetas(self.get_thetas())
         try:
@@ -39,7 +40,7 @@ class ArmSimulator(Arm):
         self.ep.set_xlim((0, 50))
         self.ep.set_ylim((0, 50))
         self.arm_objects = [[], []]
-        color_codes = ('#DAF7A6', '#FFC300', '#FF5733', '#C70039', '#900C3F', '#581845')
+        color_codes = ('#DAF7A6', '#FFC300', '#FF5733', '#C70039', '#900C3F', '#581845', '#73BT1D')
         for i in range(1, self.t0.shape[0]):
             self.arm_objects[0].extend(
                 self.ax.plot([self.t0[i - 1][0][3], self.t0[i][0][3]], [self.t0[i - 1][1][3], self.t0[i][1][3]],
@@ -52,7 +53,7 @@ class ArmSimulator(Arm):
                              [self.t0[i][2][3], self.z0[i][2][3]], '-',
                              markersize=5, linewidth=1, label="z{0}".format(i + 1), color=color_codes[-i - 1]))
         plt.ion()
-        plt.show()
+        # plt.show()
 
 
     def visualizeArm(self):
@@ -79,15 +80,15 @@ class ArmSimulator(Arm):
             line.set_data([self.t0[i][0][3], self.z0[i][0][3]], [self.t0[i][1][3], self.z0[i][1][3]])
             line.set_3d_properties([self.t0[i][2][3], self.z0[i][2][3]])
 
-        self.ep.scatter(self.t0[-1][0][3], self.t0[-1][1][3], color='#B0B0B0', s=1)
-        self.ax.scatter(self.t0[-1][0][3], self.t0[-1][1][3], self.t0[-1][2][3], color='#B0B0B0', s=1)
+        self.ep.scatter(*self.get_xy(), color='#B0B0B0', s=1)
+        self.ax.scatter(*self.get_xy(), self.t0[-1][2][3], color='#B0B0B0', s=1)
 
-        plt.pause(0.00025)
+        plt.pause(0.005)
 
     def set_thetas(self, position=(0, 0, 0, 0), wait=False):
         a1, a2, a3, a4 = position
         # print (position)
-        self.dhp[:, 3] = (np.mat([a1, a2, a3, a4, 0, 0])).T
+        self.dhp[:, 3] = (np.mat([a1, a2, a3, a4, 0, 0, 0]))
         self.tf()
 
     def get_thetas(self):
@@ -105,7 +106,7 @@ class ArmSimulator(Arm):
         self.tf()
 
     def set_position(self, i, position=512, wait=False):
-        theta = 0 if i == 2 else np.pi / 2
+        theta = 0 if i == 2 else np.pi/2
         self.dhp[i - 1, 3] = self.pos_to_theta(position, theta)
 
     def theta_to_pos(self, theta, theta_shift):
@@ -140,6 +141,3 @@ class ArmSimulator(Arm):
 
     def get_ea(self):
         return self.t0[-1][0][3], self.t0[-1][1][3], self.t0[-1][1][3]
-
-    def get_xy(self):
-        return self.t0[-1][0][3], self.t0[-1][1][3]
