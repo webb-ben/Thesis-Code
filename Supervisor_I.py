@@ -14,10 +14,10 @@ np.set_printoptions(precision=5, suppress=True)
 def step(p1, p2, x, y, s):
     """
      Follows the linear equations
-     X Axis:  P1 = -5.5913346 * X + 1139.582 - P2
-              P2 = -0.1292621 * X **2 + -8.7684171 * Y + 890.1188361
-     Y Axis:  P1 = 9.6372704 * Y + 172.9242101
-              P2 = -0.1342670 * Y**2 + -3.9898714 * X + 774.8796034
+     X Axis:  (θ1 + θ2) = -5.3632658 * X + 1120.010
+              θ2 = -0.1355965 * X **2 + -9.2264242 * Y + 906.0431074
+     Y Axis:  θ1 = 9.3842993 * Y + 169.6051377
+              θ2 = -0.1325344 * Y**2 + -6.0077490 * X + 818.3672410
     :param t1:
     :param t2:
     :param xy:
@@ -25,10 +25,9 @@ def step(p1, p2, x, y, s):
     :return:
     """
     return np.array((p1, p2)) + np.array(
-        ((-5.5913346 + 0.2585242 * x, 9.372704),
-         (-0.2585242 * x, -0.268534 * y))
+        ((-5.3632658 + 0.271193 * x, 9.3842993),
+         (-0.271193 * x, -0.2650688 * y))
     ) @ s
-
 
 class PID:
     def __init__(self, pos):
@@ -78,17 +77,19 @@ class PID:
 class PDA(PID):
     def __init__(self, pos):
         PID.__init__(self, pos)
+        dx, px, ax = 0.068316, 0.053957, 0.118652
+        dy, py, ay = 0.068658, 0.053991, 0.086783
+        self.update_pid_weight(dx, px, ax, dy, py, ay)
 
     def update_pid(self, pos, d):
         self.pos += d
         residuals = self.pos - pos
 
-        # print (self.pid, self.pid[:, 0], residuals, self.pid[:, 1])
         self.pid[:, 2] = (residuals - self.pid[:, 1]) - self.pid[:, 0]
         self.pid[:, 0] = residuals - self.pid[:, 1]
         self.pid[:, 1] = residuals
 
-        self.pid_abs_error += abs(self.pid[:, 2])
+        self.pid_abs_error += abs(residuals)
 
         result = self.pid @ self.pid_weights
 
@@ -110,7 +111,7 @@ class Supervisor:
         except OSError:
             _ = None
 
-        self.arm = Arm(port_handler, packet_handler)
+        self.arm = ArmSimulator(port_handler, packet_handler)
         self.apply_pressure = False
         self.pid = PDA(self.arm.get_xy())
         self.p1, self.p2, self.p3, self.p4 = self.arm.get_positions()
@@ -125,7 +126,7 @@ class Supervisor:
         _ = time.perf_counter() + step_time
         x, y = self.arm.get_xy()
         pid = self.pid.update_pid(np.array((x,y)), s)
-        self.p1, self.p2 = step(self.p1, self.p2, x, y, s)
+        self.p1, self.p2 = step(self.p1, self.p2, x, y, s + pid)
         self.arm.set_positions((self.p1, self.p2, self.p3, self.p4))
         print (*self.pid.pos, x, y,
                self.p1, self.arm.get_position(1),
@@ -133,28 +134,20 @@ class Supervisor:
         while time.perf_counter() < _:
             pass
 
-    def move_i(self, s, step_time):
-        """
-        :param d:
-        :param steps:
-        :param step_time:
-        :return:
-        """
+    def move_jacobian(self, s, step_time):
         _ = time.perf_counter() + step_time
         x, y = self.arm.get_xy()
-        self.pid.update_pid(np.array((x,y)), s)
-        try:
-            self.p1, self.p2, self.p3, self.p4 = inverse_jacobian(self.p1, self.p2, self.p3, self.p4, s[0], s[1],0, 0)
-        except np.linalg.LinAlgError:
-            pass
+        pid = self.pid.update_pid(np.array((x, y)), s)
+        p = self.arm.get_inv_jacobian(*(s), 0)
+        self.p1, self.p2, self.p3, self.p4 = (np.array(((self.p1, self.p2, self.p3, self.p4),)) + np.array((p,))).tolist()[0]
         self.arm.set_thetas((self.p1, self.p2, self.p3, self.p4))
-        print (*self.pid.pos, x, y,
-               self.p1, self.arm.get_theta(1),
-               self.p2, self.arm.get_theta(2))
-        # while time.perf_counter() < _:
-        #     pass
+        print(*self.pid.pos, x, y,
+              self.p1, self.p2, self.p3, self.p4,
+              *self.arm.get_thetas())
+        while time.perf_counter() < _:
+            pass
 
-    def movement_planner(self, d, steps=400, step_time=0.005):
+    def movement_planner(self, d, steps=400, step_time=0.01):
         i = 0
         while i < steps:
             self.move(d * (np.cos(2 * np.pi * i / steps + np.pi) + 1), step_time)
@@ -167,59 +160,18 @@ class Supervisor:
         self.arm.set_positions((a1, a2, 490, a4))
         time.sleep(0.6)
 
-    def train_pid(self):
-        prev_error_x, prev_error_y = 10000.0, 10000.0
-        px, ix, dx = 0.059360, 0.000038, 0.731131
-        py, iy, dy = 0.044491, 0.000099, 0.239653
-
-        vx, vy = 0.2, 0.05
-        self.p1, self.p2, self.p3, self.p4 = self.arm.get_positions()
-        self.pid.update_origin(self.arm.get_xy())
-
-        for j in range(1):
-            self.pid.update_pid_weight(px, ix, dx, py, iy, dy)
-            r = 0
-            for f in range(1):
-                r += self.movement_planner(np.array([0.00, 0.025]))
-                r += self.movement_planner(np.array([0.025, 0.00]))
-                r += self.movement_planner(np.array([0.00, -0.025]))
-                r += self.movement_planner(np.array([-0.025, 0.00]))
-                # r += self.movement_planner(np.array([ 0.025,  0.00]))
-                # r += self.movement_planner(np.array([ 0.00,  0.025]))
-                # r += self.movement_planner(np.array([-0.025,  0.00]))
-                # r += self.movement_planner(np.array([ 0.00, -0.025]))
-            print(
-                "%.8f %.8f %.6f %.6f %.6f %.6f %.6f %.6f" %
-                (*(self.pid.pid_abs_error / r).tolist(), px, ix, dx, py, iy, dy))
-
-            if self.pid.pid_abs_error[0] / r < prev_error_x:
-                px += vx
-                vx /= 2
-            else:
-                px -= vx
-                vx *= -1
-
-            if self.pid.pid_abs_error[1] / r < prev_error_y:
-                py += vy
-                vy /= 2
-            else:
-                py -= vy
-                vy *= -1
-
-            prev_error_x, prev_error_y = self.pid.pid_abs_error / r
-
     def train_pda(self):
         prev_error_x, prev_error_y = 10000.0, 10000.0
 
-        px, dx, ax = 0.0083159, 0.0092100, 0.019590
-        py, dy, ay = 0.00115781,  0.0097181, 0.042877
+        dx, px, ax = 0.068316, 0.053957, 0.118652
+        dy, py, ay = 0.068658, 0.053991, 0.086783
 
-        # px, dx, ax = 0.0,0.0,0.0
-        # py, dy, ay = 0.0,0.0,0.0
-        vx, vy = 0.02, 0.02
+
+        vx, vy = 0.04, 0.04
         self.p1, self.p2, self.p3, self.p4 = self.arm.get_positions()
+        # self.p1, self.p2, self.p3, self.p4 = self.arm.get_thetas()
+
         self.pid.update_origin(self.arm.get_xy())
-        print (self.arm.get_thetas(), self.pid.pos)
         for j in range(1):
             self.pid.update_pid_weight(dx, px, ax, dy, py, ay)
 
@@ -230,9 +182,9 @@ class Supervisor:
                 r += self.movement_planner(np.array([ 0.00, -0.025]))
                 r += self.movement_planner(np.array([-0.025,  0.00]))
                 r += self.movement_planner(np.array([ 0.025,  0.025]))
-                r += self.movement_planner(np.array([-0.025,  0.00]))
-                r += self.movement_planner(np.array([ 0.025, -0.025]))
-                r += self.movement_planner(np.array([-0.025,  0.00]))
+                r += self.movement_planner(np.array([ 0.00, -0.025]))
+                r += self.movement_planner(np.array([-0.025,  0.025]))
+                r += self.movement_planner(np.array([ 0.00, -0.025]))
             print(
                   "%.8f %.8f %.6f %.6f %.6f %.6f %.6f %.6f" %
                   (*(self.pid.pid_abs_error / r).tolist(), dx, px, ax, dy, py, ay))
@@ -271,13 +223,18 @@ if __name__ == "__main__":
     # sup.pressure()
     t = time.time()
     try:
-        # sup.train_pda()
-        sup.arm.trial()
-        print (time.time()-t)
-    finally:
+        print(sup.arm.get_xy(), sup.arm.get_thetas())
+        sup.train_pda()
+
+        #         # sup.arm.trial()
+        # print ((time.time()-t))
+    except KeyboardInterrupt:
         sup.arm.close_connection()
+    sup.arm.close_connection()
 
 """
 (14.183619690700096, 29.93854626661372) [13.797831297501167, 31.52263138084135, 0.2596464380613739]
 18.630549558051385, 29.38649328492162) [18.48891994045686, 32.9048012791081, 1.7457253917922628]
+0.00017344667911529542
+0.000006416511535644531
 """

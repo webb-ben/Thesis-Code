@@ -4,19 +4,18 @@ from Arm import *
 
 class ArmSimulator(Arm):
     def __init__(self, port_handler, packet_handler):
-        self.dhp = np.array([[0, 0, 10.5, -0.5628260460248966],
-                  [0, 22, 0,1.92895835457],
-                  [-np.pi / 2, 24.5, 0, -0.3069960255248967],
-                  [np.pi / 2, 7, 0, -0.3069960255248967],
-                  [0,0, -1.25, 0],
-                  [0, 5, 0, 0],
-                  [0, 0, -8.5, 0]])
+        self.dhp = np.array([[0.0, 0.0, 10.5, -0.4502608370048966],
+                  [0.0, 22.0, 0.0,  2.0057073607199998],
+                  [np.pi / 2, 24.5, 0.0,  0.2558300195751033],
+                  [-np.pi / 2, 7, -1.5, -0.020466402564896624],
+                  [0.0, 5.0, -8.5, 0.0]])
         self.init_vis()
         self.set_thetas(self.get_thetas())
         try:
             Arm.__init__(self, port_handler, packet_handler)
-        except:
+        except AttributeError:
             self.motor_list = []
+
 
     def init_vis(self):
         self.t0 = np.empty((self.dhp.shape[0], 4, 4))
@@ -40,7 +39,7 @@ class ArmSimulator(Arm):
         self.ep.set_xlim((0, 50))
         self.ep.set_ylim((0, 50))
         self.arm_objects = [[], []]
-        color_codes = ('#DAF7A6', '#FFC300', '#FF5733', '#C70039', '#900C3F', '#581845', '#73BT1D')
+        color_codes = ('#DAF7A6', '#FFC300', '#FF5733', '#C70039', '#900C3F', '#FF1845', '#FF3214')
         for i in range(1, self.t0.shape[0]):
             self.arm_objects[0].extend(
                 self.ax.plot([self.t0[i - 1][0][3], self.t0[i][0][3]], [self.t0[i - 1][1][3], self.t0[i][1][3]],
@@ -88,7 +87,7 @@ class ArmSimulator(Arm):
     def set_thetas(self, position=(0, 0, 0, 0), wait=False):
         a1, a2, a3, a4 = position
         # print (position)
-        self.dhp[:, 3] = (np.mat([a1, a2, a3, a4, 0, 0, 0]))
+        self.dhp[:4, 3] = (np.mat([a1, a2, a3, a4]))
         self.tf()
 
     def get_thetas(self):
@@ -108,12 +107,6 @@ class ArmSimulator(Arm):
     def set_position(self, i, position=512, wait=False):
         theta = 0 if i == 2 else np.pi/2
         self.dhp[i - 1, 3] = self.pos_to_theta(position, theta)
-
-    def theta_to_pos(self, theta, theta_shift):
-        return (205 + (theta + theta_shift) * 195.442270117)
-
-    def pos_to_theta(self, pos, theta_shift):
-        return (pos - 205) * 0.00511660041 - theta_shift
 
     def tf(self):
         for i in range(self.dhp.shape[0]):
@@ -135,9 +128,6 @@ class ArmSimulator(Arm):
                                                        [0, 0, 1, 5],
                                                        [0, 0, 0, 1]]))
         # self.visualizeArm()
-
-    def close_connection(self):
-        return
 
     def get_ea(self):
         return self.t0[-1][0][3], self.t0[-1][1][3], self.t0[-1][1][3]
