@@ -6,10 +6,10 @@ from Arm import *
 from ArmSimulator import ArmSimulator
 from dynamixelSDK.src.dynamixel_sdk import PortHandler, PacketHandler
 import time
+import cv2
 import random
 
 np.set_printoptions(precision=5, suppress=True)
-
 
 def step(p1, p2, x, y, s):
     """
@@ -77,7 +77,7 @@ class PID:
 class PDA(PID):
     def __init__(self, pos):
         PID.__init__(self, pos)
-        dx, px, ax = 0.068316, 0.053957, 0.118652
+        dx, px, ax = 0.068316, 0.053957, 0.098652
         dy, py, ay = 0.068658, 0.053991, 0.086783
         self.update_pid_weight(dx, px, ax, dy, py, ay)
 
@@ -113,8 +113,11 @@ class Supervisor:
 
         self.arm = ArmSimulator(port_handler, packet_handler)
         self.apply_pressure = False
-        self.pid = PDA(self.arm.get_xy())
+        self.xy = self.arm.get_xy()
+        self.pid = PDA(self.xy)
         self.p1, self.p2, self.p3, self.p4 = self.arm.get_positions()
+        self.t1, self.t2, self.t3, self.t4 = self.arm.get_thetas()
+
 
     def move(self, s, step_time):
         """
@@ -124,24 +127,24 @@ class Supervisor:
         :return:
         """
         _ = time.perf_counter() + step_time
-        x, y = self.arm.get_xy()
-        pid = self.pid.update_pid(np.array((x,y)), s)
-        self.p1, self.p2 = step(self.p1, self.p2, x, y, s + pid)
+        self.xy = np.array(self.xy) * 0.8 + np.array(self.arm.get_xy()) * 0.2
+        pid = self.pid.update_pid(self.xy, s)
+        self.p1, self.p2 = step(self.p1, self.p2, *self.xy, s + pid)
         self.arm.set_positions((self.p1, self.p2, self.p3, self.p4))
-        print (*self.pid.pos, x, y,
+        print (*self.pid.pos, *self.xy,
                self.p1, self.arm.get_position(1),
                self.p2, self.arm.get_position(2))
         while time.perf_counter() < _:
             pass
 
-    def move_jacobian(self, s, step_time):
+    def move_jacobian(self, s, step_time, z = 0.0):
         _ = time.perf_counter() + step_time
-        x, y = self.arm.get_xy()
-        pid = self.pid.update_pid(np.array((x, y)), s)
-        p = self.arm.get_inv_jacobian(*(s), 0)
-        self.p1, self.p2, self.p3, self.p4 = (np.array(((self.p1, self.p2, self.p3, self.p4),)) + np.array((p,))).tolist()[0]
-        self.arm.set_thetas((self.p1, self.p2, self.p3, self.p4))
-        print(*self.pid.pos, x, y,
+        self.xy = np.array(self.xy) * 0.5 + np.array(self.arm.get_xy()) * 0.5
+        pid = self.pid.update_pid(self.xy, s)
+        p = self.arm.get_inv_jacobian(*(s + pid), z)
+        self.t1, self.t2, self.t3, self.t4 = (np.array(((self.t1, self.t2, self.t3, self.t4),)) + np.array((p,))).tolist()[0]
+        self.arm.set_thetas((self.t1, self.t2, self.t3, self.t4))
+        print(*self.pid.pos, *self.xy,
               self.p1, self.p2, self.p3, self.p4,
               *self.arm.get_thetas())
         while time.perf_counter() < _:
@@ -150,7 +153,7 @@ class Supervisor:
     def movement_planner(self, d, steps=400, step_time=0.01):
         i = 0
         while i < steps:
-            self.move(d * (np.cos(2 * np.pi * i / steps + np.pi) + 1), step_time)
+            self.move_jacobian(d * (np.cos(2 * np.pi * i / steps + np.pi) + 1), step_time)
             i += 1
         return i
 
@@ -164,16 +167,15 @@ class Supervisor:
         prev_error_x, prev_error_y = 10000.0, 10000.0
 
         dx, px, ax = 0.068316, 0.053957, 0.118652
-        dy, py, ay = 0.068658, 0.053991, 0.086783
+        dy, py, ay = 0.068658, 0.003991, 0.086783
 
 
         vx, vy = 0.04, 0.04
         self.p1, self.p2, self.p3, self.p4 = self.arm.get_positions()
-        # self.p1, self.p2, self.p3, self.p4 = self.arm.get_thetas()
+        self.t1, self.t2, self.t3, self.t4 = self.arm.get_thetas()
 
         self.pid.update_origin(self.arm.get_xy())
         for j in range(1):
-            self.pid.update_pid_weight(dx, px, ax, dy, py, ay)
 
             r = 0
             for f in range(1):
@@ -205,6 +207,20 @@ class Supervisor:
 
             prev_error_x, prev_error_y = self.pid.pid_abs_error / r
 
+    def write(self, letters = ''):
+        import alfabet
+        self.pid.update_origin(self.arm.get_xy())
+
+        for letter in letters:
+            l = alfabet.alfabet[letter]
+            for segment in l:
+                reshape = np.array(segment).reshape(len(segment)//3,3)
+                for s in range(reshape.shape[0]):
+                    dx, dy, dz = reshape[s,:] * (np.cos(2 * np.pi * s / reshape.shape[0] + np.pi) + 1)
+                    self.move_jacobian(np.array((dx,dy)), 0.02, dz)
+
+
+
 '''
 0.12102758 0.06611705 0.022100 0.059360 0.000000 0.021800 0.044490 0.000000
 0.11071103 0.06223150 0.022100 0.059360 0.050000 0.021800 0.044490 0.050000
@@ -219,17 +235,10 @@ class Supervisor:
 '''
 if __name__ == "__main__":
     sup = Supervisor()
-
-    # sup.pressure()
-    t = time.time()
     try:
-        print(sup.arm.get_xy(), sup.arm.get_thetas())
-        sup.train_pda()
-
-        #         # sup.arm.trial()
-        # print ((time.time()-t))
+        sup.write(('+MY THESIS'))
     except KeyboardInterrupt:
-        sup.arm.close_connection()
+        pass
     sup.arm.close_connection()
 
 """
